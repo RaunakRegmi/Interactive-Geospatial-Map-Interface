@@ -40,7 +40,7 @@ export const DATUM_ASL_M = 640;
 export const CHANNEL_HALF_WIDTH_M = 70;
 
 /** South-west corner of the (illustrative) georeferenced tile, WGS84. */
-export const GEO_ORIGIN = { lat: 30.18, lon: 79.58 } as const;
+export const GEO_ORIGIN = { lat: 27.92, lon: 85.52 } as const;
 const CENTER_LAT_RAD = ((GEO_ORIGIN.lat + EXTENT_M / 111_320 / 2) * Math.PI) / 180;
 export const SPAN_LAT_DEG = EXTENT_M / 111_320;
 export const SPAN_LON_DEG = EXTENT_M / (111_320 * Math.cos(CENTER_LAT_RAD));

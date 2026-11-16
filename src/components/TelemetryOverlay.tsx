@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from 'react';
-import { ChevronDown, ChevronUp, Crosshair, Layers, Moon, Sun } from 'lucide-react';
+import { Box, ChevronDown, ChevronUp, Crosshair, Layers, Map as MapIcon, Moon, Sun } from 'lucide-react';
 import {
   HYPSOMETRIC_STOPS,
   THRESHOLDS,
@@ -90,9 +90,9 @@ function Segmented<T extends string>({
           role="radio"
           aria-checked={value === o.id}
           onClick={() => onChange(o.id)}
-          className={`flex items-center gap-1.5 px-2.5 text-[11px] font-medium transition-colors ${
+          className={`flex items-center gap-1.5 whitespace-nowrap px-2.5 text-[11px] font-medium transition-colors ${
             n > 0 ? 'border-l border-line' : ''
-          } ${value === o.id ? 'bg-fg text-canvas' : 'text-muted hover:bg-subtle hover:text-fg'}`}
+          } ${value === o.id ? 'bg-brand text-white' : 'text-muted hover:bg-subtle hover:text-fg'}`}
         >
           {o.icon}
           {o.label}
@@ -115,25 +115,41 @@ interface HeaderBarProps {
   onTheme: (t: ThemeMode) => void;
   onLayer: (l: LayerMode) => void;
   onScenario: (s: Scenario) => void;
+  view: ViewMode;
+  onView: (v: ViewMode) => void;
 }
 
-export function HeaderBar({ params, stats, hover, theme, layer, onTheme, onLayer, onScenario }: HeaderBarProps) {
+export type ViewMode = '2d' | '3d';
+
+export function HeaderBar({ params, stats, hover, theme, layer, onTheme, onLayer, onScenario, view, onView }: HeaderBarProps) {
   return (
-    <header className="relative z-20 flex h-12 shrink-0 items-center justify-between gap-4 border-b border-line bg-panel px-4">
+    <header className="relative z-20 flex h-14 shrink-0 items-center justify-between gap-4 border-b border-line bg-panel px-4">
       <div className="flex min-w-0 items-center gap-4">
         <div className="flex shrink-0 items-center gap-2">
-          <svg width="18" height="18" viewBox="0 0 32 32" aria-hidden className="text-fg">
-            <path d="M3 24 L11 12 L16 18 L21 9 L29 24" fill="none" stroke="currentColor" strokeWidth="2" />
-            <path d="M3 27 H29" stroke="rgb(var(--c-accent))" strokeWidth="2" />
-          </svg>
-          <h1 className="whitespace-nowrap font-mono text-[12px] font-semibold tracking-[0.06em] text-fg">
-            GEOSPATIAL HYDRO-SLOPE SIMULATOR <span className="text-muted">// v1.0</span>
+          <img src="/pahiro-mark.png" alt="" width={34} height={34} className="h-[34px] w-[34px] rounded-full bg-white" />
+          <h1 className="flex flex-col leading-none">
+            <span className="whitespace-nowrap text-[15px] font-semibold tracking-[0.04em] text-brand dark:text-fg">
+              PAHIRO <span className="text-brandred">GUARD</span>
+            </span>
+            <span className="mt-0.5 hidden whitespace-nowrap font-mono text-[9px] uppercase tracking-[0.12em] text-muted sm:block">
+              Flood &amp; Landslide Risk Platform // v1.1
+            </span>
           </h1>
         </div>
-        <div className="hidden h-5 w-px bg-line xl:block" />
-        <div className="hidden min-w-0 items-center gap-2 font-mono text-[11px] text-muted xl:flex">
+        <div className="hidden h-6 w-px bg-line md:block" />
+        <Segmented<ViewMode>
+          ariaLabel="View"
+          value={view}
+          onChange={onView}
+          options={[
+            { id: '2d', label: '2D Flood Map', icon: <MapIcon size={13} strokeWidth={1.5} /> },
+            { id: '3d', label: '3D Terrain', icon: <Box size={13} strokeWidth={1.5} /> },
+          ]}
+        />
+        <div className="hidden h-5 w-px bg-line min-[1800px]:block" />
+        <div className="hidden min-w-0 items-center gap-2 font-mono text-[11px] text-muted min-[1800px]:flex">
           <Crosshair size={13} strokeWidth={1.5} className="shrink-0" />
-          {hover ? (
+          {hover && view === '3d' ? (
             <span className="tnum truncate">
               <span className="text-fg">{hover.lat.toFixed(5)}°N</span>{' '}
               <span className="text-fg">{hover.lon.toFixed(5)}°E</span>
@@ -165,7 +181,7 @@ export function HeaderBar({ params, stats, hover, theme, layer, onTheme, onLayer
                 onClick={() => onScenario(s)}
                 title={s.label}
                 className={`px-2.5 text-[11px] font-medium transition-colors ${n > 0 ? 'border-l border-line' : ''} ${
-                  active ? 'bg-subtle text-fg' : 'text-muted hover:bg-subtle hover:text-fg'
+                  active ? 'bg-brandred text-white' : 'text-muted hover:bg-subtle hover:text-fg'
                 }`}
               >
                 <span className="hidden min-[1760px]:inline">{s.label}</span>
@@ -174,7 +190,7 @@ export function HeaderBar({ params, stats, hover, theme, layer, onTheme, onLayer
             );
           })}
         </div>
-        <div className="hidden md:block">
+        <div className={view === '3d' ? 'hidden md:block' : 'hidden'}>
           <Segmented<LayerMode>
             ariaLabel="Layer mode"
             value={layer}

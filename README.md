@@ -1,6 +1,15 @@
-# Geospatial Hydro-Slope Simulator
+<p align="center"><img src="public/pahiro-logo.png" alt="Pahiro Guard" width="220" /></p>
 
-An interactive 3D simulation of slope instability and flood risk in a mountain river valley, written in React 18, TypeScript, Three.js and Tailwind CSS.
+# Pahiro Guard
+
+A flood and landslide risk platform for a mountain river valley in Nepal. *Pahiro* (पहिरो) is Nepali for landslide.
+
+It has two views:
+
+- **2D Flood Map**: a layer-based GIS viewer in the style of national flood-map portals. It shows flood extents and depths for High (10% AEP), Medium (1% AEP) and Low (0.1% AEP) probability events under Present Day, Mid-Range Future and High-End Future climate scenarios. It also shows past flood events, buildings at risk, river gauges, landslide susceptibility and a click-to-query local area summary report.
+- **3D Terrain**: an interactive simulation of slope instability and flood risk, driven by rainfall intensity, slope gradient and river level.
+
+It is written in React 18, TypeScript, Three.js, Canvas 2D and Tailwind CSS.
 
 It runs entirely in the browser with no map tokens or network services, so it works offline during live presentations. Fonts are bundled locally.
 
@@ -16,11 +25,21 @@ It runs entirely in the browser with no map tokens or network services, so it wo
 | **Risk model** | A deterministic composite instability and flood risk score is computed per vertex and as a global score, then drawn as a choropleth draped on the terrain. |
 | **Cartography** | 50 m contours (250 m index contours), a 1 km grid, lat/lon tick labels, an elevation axis in m ASL, a north marker and a live cursor readout. |
 
-The tile is georeferenced to an illustrative extent near 30.18–30.25°N, 79.58–79.66°E. The terrain is synthetic and does not represent surveyed ground.
+The tile is georeferenced to an illustrative extent in central Nepal (27.92–27.99°N, 85.52–85.60°E). The terrain is synthetic and does not represent surveyed ground.
 
 ---
 
-## 2. Simulation model
+## 2. 2D flood map
+
+| Element | Description |
+| --- | --- |
+| **Sidebar** | **Layers** tab (grouped, filterable layer tree with inline legends, an *Active* filter and overlay opacity), **Tools** tab (local area summary report and exposure summary) and **Info** tab (layer metadata). |
+| **Flood model** | A 12.5 m elevation raster resampled from the DEM. For each design event, a water level (High 4.8 m, Medium 7.8 m and Low 10.8 m above gauge datum, plus +0.9 m Mid-Range or +1.8 m High-End climate uplift) is filled outward from the river channel. Only cells connected to the channel flood. Depth is water level minus ground level. |
+| **Exposure** | 300 synthetic building footprints, classified by the most frequent design flood that reaches them. Flooded area, buildings and people (at 2.4 per dwelling) are reported for every scenario and probability. |
+| **Point query** | Clicking the map produces flood depths for all 9 scenario × probability combinations, local slope and live landslide risk, buildings within 500 m and past events within 2.5 km. The report exports to CSV. |
+| **Map chrome** | Topographic, Imagery and Monochrome basemaps; zoom and full-extent buttons; north arrow; scale bar; graticule; and a live lat/lon, local grid and elevation readout. |
+
+## 3. Simulation model
 
 ### 2.1 Inputs
 
@@ -79,13 +98,17 @@ Safe cells are shaded by normalised elevation so relief stays readable. Critical
 
 ---
 
-## 3. Architecture
+## 4. Architecture
 
 ```
 src/
 ├── engine/
+│   ├── floodModel.ts         Design-event inundation (AEP × climate scenario), exposure data, reports
 │   └── terrainMath.ts        DEM generation, slope calibration, risk model, colour maps, georeferencing
 ├── components/
+│   ├── FloodMap2D.tsx        Canvas 2D map: basemaps, raster flood layers, vectors, pan/zoom, query
+│   ├── Sidebar.tsx           Layers / Tools / Info tabs
+│   ├── layerCatalog.ts       Layer groups, legends and metadata
 │   ├── GeoViewport.tsx       Three.js scene: terrain, contour/grid shader, skirt, water, rain,
 │   │                         theme-aware lighting & fog, OrbitControls, camera presets, raycast readout
 │   ├── ControlTaskbar.tsx    Precision sliders with threshold markers, Reset, Pause/Play rain
@@ -105,7 +128,7 @@ src/
 
 **Theming**
 
-Tailwind uses the `class` dark-mode strategy and colours resolve from CSS custom properties. The same theme switch drives the WebGL scene: background/sky, fog, hemisphere and sun lighting, contour and grid line colours, water and rain.
+The palette follows the Pahiro Guard logo: white, navy `#03255E` and crimson `#C8102E`. Tailwind uses the `class` dark-mode strategy and colours resolve from CSS custom properties. The same theme switch drives the WebGL scene: background/sky, fog, hemisphere and sun lighting, contour and grid line colours, water and rain.
 
 **Camera**
 
@@ -113,7 +136,7 @@ Tailwind uses the `class` dark-mode strategy and colours resolve from CSS custom
 
 ---
 
-## 4. Local setup
+## 5. Local setup
 
 Requirements: Node.js ≥ 18.
 
@@ -128,16 +151,19 @@ npm run preview      # serve the production build
 ### Deep links (handy for presentations)
 
 ```
-/?scenario=nominal|monsoon|extreme
+/?view=2d|3d
+ &scenario=nominal|monsoon|extreme
  &theme=light|dark
- &layer=risk|elevation
- &view=isometric|section|topdown
+ &basemap=topographic|imagery|monochrome
+ &layers=extent:present:high,buildings,...
+ &layer=risk|elevation              (3D colouring)
+ &camera=isometric|section|topdown  (3D camera)
 ```
 
-For example, `/?scenario=extreme&view=section&theme=dark`.
+For example, `/?view=3d&scenario=extreme&camera=section&theme=dark`.
 
 ---
 
-## 5. Disclaimer
+## 6. Disclaimer
 
 This is a visualisation and teaching tool. The DEM is procedural, and the risk formula is a deterministic heuristic loosely based on infinite-slope stability and stage-inundation concepts. It is not calibrated against field data and must not be used for real hazard assessment or emergency decisions.

@@ -15,6 +15,8 @@ export default {
         warn: 'rgb(var(--c-warn) / <alpha-value>)',
         warnink: 'rgb(var(--c-warn-ink) / <alpha-value>)',
         crit: 'rgb(var(--c-crit) / <alpha-value>)',
+        brand: 'rgb(var(--c-brand) / <alpha-value>)',
+        brandred: 'rgb(var(--c-brandred) / <alpha-value>)',
         accent: 'rgb(var(--c-accent) / <alpha-value>)',
       },
       fontFamily: {
