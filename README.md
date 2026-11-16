@@ -88,6 +88,8 @@ Global telemetry reports the **peak** risk, mean risk, area at ≥ 75%, area at 
 
 Safe cells are shaded by normalised elevation so relief stays readable. Critical cells on steep faces get a subtle highlight. The **Topographic** layer swaps the choropleth for a hypsometric tint, so you can compare the raw geography with the risk zones.
 
+The default **Landscape** layer shows natural land cover instead: field patchwork on the floodplain, terraces on the lower slopes, patchy forest, alpine grass, rock and snow, all derived from the DEM. In every layer the 3D scene also draws the same roads, Town Bridge and buildings as the 2D flood map, plus about 15,000 instanced trees, all draped on the live terrain with sun shadows. Footprints are drawn about 1.6× real size so they stay readable from the overview camera. The **World Features** button in the viewport hides them.
+
 ### 2.5 Scenario presets
 
 | Preset | I (mm/hr) | S (°) | H (m) | Peak risk |
@@ -156,8 +158,9 @@ npm run preview      # serve the production build
  &theme=light|dark
  &basemap=topographic|imagery|monochrome
  &layers=extent:present:high,buildings,...
- &layer=risk|elevation              (3D colouring)
+ &layer=landscape|risk|elevation    (3D colouring)
  &camera=isometric|section|topdown  (3D camera)
+ &world=0                           (hide 3D roads/buildings/trees)
 ```
 
 For example, `/?view=3d&scenario=extreme&camera=section&theme=dark`.

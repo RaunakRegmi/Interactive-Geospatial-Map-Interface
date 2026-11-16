@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from 'react';
-import { Box, ChevronDown, ChevronUp, Crosshair, Layers, Map as MapIcon, Moon, Sun } from 'lucide-react';
+import { Box, ChevronDown, ChevronUp, Crosshair, Layers, Map as MapIcon, Moon, Mountain, Sun } from 'lucide-react';
 import {
   HYPSOMETRIC_STOPS,
   THRESHOLDS,
@@ -196,6 +196,7 @@ export function HeaderBar({ params, stats, hover, theme, layer, onTheme, onLayer
             value={layer}
             onChange={onLayer}
             options={[
+              { id: 'landscape', label: 'Landscape', icon: <Mountain size={13} strokeWidth={1.5} /> },
               { id: 'risk', label: 'Risk Choropleth', icon: <Layers size={13} strokeWidth={1.5} /> },
               { id: 'elevation', label: 'Topographic' },
             ]}
@@ -304,14 +305,25 @@ export function TelemetryCard({ params, stats, layer }: TelemetryCardProps) {
             <div className="mb-1.5 flex items-center justify-between text-[11px] text-muted">
               <span>Legend</span>
               <span className="font-mono text-[9px] uppercase tracking-wider">
-                {layer === 'risk' ? 'Risk Choropleth' : 'Hypsometric Tint'}
+                {layer === 'risk' ? 'Risk Choropleth' : layer === 'landscape' ? 'Land Cover' : 'Hypsometric Tint'}
               </span>
             </div>
-            <ul className={`space-y-1 font-mono text-[11px] ${layer === 'elevation' ? 'opacity-60' : ''}`}>
-              <LegendRow swatch="bg-safe" range="< 50%" label="Safe" />
-              <LegendRow swatch="bg-warn" range="50–74%" label="Elevated" />
-              <LegendRow swatch="bg-crit" range="≥ 75%" label="Critical" />
-            </ul>
+            {layer === 'landscape' ? (
+              <ul className="grid grid-cols-2 gap-x-3 gap-y-1 text-[11px]">
+                {LAND_COVER_LEGEND.map(([color, label]) => (
+                  <li key={label} className="flex items-center gap-2">
+                    <span className="h-3 w-3 border border-fg/10" style={{ background: color }} />
+                    <span className="text-muted">{label}</span>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <ul className={`space-y-1 font-mono text-[11px] ${layer === 'elevation' ? 'opacity-60' : ''}`}>
+                <LegendRow swatch="bg-safe" range="< 50%" label="Safe" />
+                <LegendRow swatch="bg-warn" range="50–74%" label="Elevated" />
+                <LegendRow swatch="bg-crit" range="≥ 75%" label="Critical" />
+              </ul>
+            )}
             {layer === 'elevation' && (
               <div className="mt-2.5">
                 <div
@@ -387,6 +399,17 @@ function Flag({
     </li>
   );
 }
+
+const LAND_COVER_LEGEND: [string, string][] = [
+  ['#97A85A', 'Fields'],
+  ['#A3AD62', 'Terraces'],
+  ['#3F6131', 'Forest'],
+  ['#948D66', 'Alpine'],
+  ['#7D766C', 'Rock'],
+  ['#F3F5F7', 'Snow'],
+  ['#3A3D43', 'Roads'],
+  ['#2F6D8C', 'River'],
+];
 
 function LegendRow({ swatch, range, label }: { swatch: string; range: string; label: string }) {
   return (

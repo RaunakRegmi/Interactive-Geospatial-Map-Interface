@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { CSS2DObject, CSS2DRenderer } from 'three/examples/jsm/renderers/CSS2DRenderer.js';
-import { Box, Columns3, Map as MapIcon } from 'lucide-react';
+import { Box, Columns3, Map as MapIcon, Trees } from 'lucide-react';
 import {
   CELL_M,
   DATUM_ASL_M,
@@ -17,8 +17,10 @@ import {
   WORLD_SIZE,
   clamp,
   computeField,
+  computeLandCover,
   createFieldBuffers,
   elevationColor,
+  landscapeColor,
   riskColor,
   worldToIndex,
   worldToLatLon,
@@ -27,6 +29,8 @@ import {
   type SimParams,
   type ThemeMode,
 } from '../engine/terrainMath';
+import type { Building, Polyline } from '../engine/floodModel';
+import { createWorldFeatures } from './worldFeatures';
 
 /* ------------------------------------------------------------------------ */
 /* Public types                                                              */
@@ -56,6 +60,12 @@ interface GeoViewportProps {
   cameraRequest: CameraRequest;
   onCameraPreset: (preset: CameraPreset) => void;
   onHover: (info: HoverInfo | null) => void;
+  /** Synthetic roads & buildings shared with the 2D flood map. */
+  buildings: Building[];
+  roads: Polyline[];
+  /** Show roads, buildings, bridge and forest on the terrain. */
+  showWorld: boolean;
+  onToggleWorld: () => void;
 }
 
 /* ------------------------------------------------------------------------ */
@@ -88,6 +98,7 @@ interface SceneTheme {
   frame: number;
   skirt: number;
   water: number;
+  waterNatural: number;
   rain: number;
   rainOpacity: number;
 }
@@ -107,6 +118,7 @@ const SCENE_THEMES: Record<ThemeMode, SceneTheme> = {
     frame: 0x3b4d75,
     skirt: 0x0b1730,
     water: 0x2563eb,
+    waterNatural: 0x1f5873,
     rain: 0xb4c3d6,
     rainOpacity: 0.55,
   },
@@ -124,6 +136,7 @@ const SCENE_THEMES: Record<ThemeMode, SceneTheme> = {
     frame: 0x94a3b8,
     skirt: 0xd9e1ec,
     water: 0x03255e,
+    waterNatural: 0x2f6d8c,
     rain: 0x475569,
     rainOpacity: 0.5,
   },
@@ -192,6 +205,8 @@ export default function GeoViewport(props: GeoViewportProps) {
     const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.toneMapping = THREE.NoToneMapping;
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     renderer.domElement.className = 'block h-full w-full outline-none';
     container.appendChild(renderer.domElement);
 
@@ -224,6 +239,11 @@ export default function GeoViewport(props: GeoViewportProps) {
     const hemi = new THREE.HemisphereLight(0xffffff, 0x222222, 1);
     const sun = new THREE.DirectionalLight(0xfff4e6, 2);
     sun.position.set(-110, 150, -90); // NW illumination (cartographic hillshade convention)
+    sun.castShadow = true;
+    sun.shadow.mapSize.set(4096, 4096);
+    Object.assign(sun.shadow.camera, { left: -118, right: 118, top: 118, bottom: -118, near: 20, far: 520 });
+    sun.shadow.bias = -0.0004;
+    sun.shadow.normalBias = 0.05;
     const ambient = new THREE.AmbientLight(0xffffff, 0.12);
     scene.add(hemi, sun, ambient);
 
@@ -258,6 +278,8 @@ export default function GeoViewport(props: GeoViewportProps) {
     const colAttr = new THREE.BufferAttribute(colors, 3).setUsage(THREE.DynamicDrawUsage);
     terrainGeo.setAttribute('position', posAttr);
     terrainGeo.setAttribute('color', colAttr);
+    const landCover = computeLandCover(dem);
+    terrainGeo.setAttribute('aLand', new THREE.BufferAttribute(landCover, 3));
     terrainGeo.setIndex(new THREE.BufferAttribute(indices, 1));
 
     const terrainUniforms = {
@@ -270,6 +292,7 @@ export default function GeoViewport(props: GeoViewportProps) {
       uGridSpacing: { value: 1000 / METERS_PER_UNIT },
       uMetersPerUnit: { value: METERS_PER_UNIT / VERTICAL_EXAGGERATION },
       uDatum: { value: DATUM_ASL_M },
+      uLandscape: { value: 0 },
     };
     const terrainMat = new THREE.MeshStandardMaterial({
       vertexColors: true,
@@ -279,8 +302,8 @@ export default function GeoViewport(props: GeoViewportProps) {
     terrainMat.onBeforeCompile = (shader) => {
       Object.assign(shader.uniforms, terrainUniforms);
       shader.vertexShader = shader.vertexShader
-        .replace('#include <common>', '#include <common>\nvarying vec3 vTerrainPos;')
-        .replace('#include <begin_vertex>', '#include <begin_vertex>\nvTerrainPos = position;');
+        .replace('#include <common>', '#include <common>\nvarying vec3 vTerrainPos;\nattribute vec3 aLand;\nvarying vec3 vLand;')
+        .replace('#include <begin_vertex>', '#include <begin_vertex>\nvTerrainPos = position;\nvLand = aLand;');
       shader.fragmentShader = shader.fragmentShader
         .replace(
           '#include <common>',
@@ -289,11 +312,51 @@ export default function GeoViewport(props: GeoViewportProps) {
           uniform vec3 uContourColor; uniform float uContourOpacity;
           uniform float uContourInterval; uniform float uIndexInterval;
           uniform vec3 uGridColor; uniform float uGridOpacity; uniform float uGridSpacing;
-          uniform float uMetersPerUnit; uniform float uDatum;`,
+          uniform float uMetersPerUnit; uniform float uDatum;
+          varying vec3 vLand; uniform float uLandscape;
+          float lhash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+          float lnoise(vec2 p) {
+            vec2 i = floor(p); vec2 f = fract(p); vec2 u = f * f * (3.0 - 2.0 * f);
+            return mix(mix(lhash(i), lhash(i + vec2(1.0, 0.0)), u.x),
+                       mix(lhash(i + vec2(0.0, 1.0)), lhash(i + vec2(1.0, 1.0)), u.x), u.y);
+          }
+          vec3 toLinear(vec3 c) { return pow(c, vec3(2.2)); }`,
         )
         .replace(
           '#include <color_fragment>',
           `#include <color_fragment>
+          if (uLandscape > 0.5) {
+            vec2 p = vTerrainPos.xz;
+            float elevL = vTerrainPos.y * uMetersPerUnit;
+            // cultivated floodplain: patchwork of fields separated by bunds / hedgerows
+            vec2 q = mat2(0.94, -0.34, 0.34, 0.94) * p / vec2(2.3, 1.45);
+            q.x += lhash(vec2(floor(q.y), 7.0));
+            vec2 cell = floor(q);
+            vec2 f = fract(q);
+            float h = lhash(cell);
+            vec3 crop = h < 0.24 ? vec3(0.56, 0.64, 0.29) : h < 0.46 ? vec3(0.40, 0.55, 0.23)
+                      : h < 0.64 ? vec3(0.76, 0.69, 0.40) : h < 0.80 ? vec3(0.55, 0.45, 0.32)
+                      : h < 0.92 ? vec3(0.33, 0.50, 0.20) : vec3(0.67, 0.72, 0.36);
+            float furrow = 0.93 + 0.07 * sin(f.y * 70.0 + h * 6.0);
+            float edgeD = min(min(f.x, 1.0 - f.x) * 2.3, min(f.y, 1.0 - f.y) * 1.45);
+            float bund = 1.0 - smoothstep(0.03, 0.09, edgeD);
+            vec3 fieldCol = mix(toLinear(crop) * furrow, toLinear(vec3(0.24, 0.33, 0.16)), bund * 0.8);
+            float fieldLod = 1.0 - smoothstep(0.12, 0.45, max(fwidth(q.x), fwidth(q.y)));
+            diffuseColor.rgb = mix(diffuseColor.rgb, fieldCol, vLand.x * fieldLod * 0.85);
+            // hillside rice / millet terraces following the contours
+            float tb = elevL / 9.0;
+            float tf = fract(tb);
+            float th = lhash(vec2(floor(tb), floor(p.x * 0.35 + p.y * 0.2)));
+            vec3 terr = mix(toLinear(vec3(0.58, 0.66, 0.30)), toLinear(vec3(0.72, 0.68, 0.38)), th);
+            float riser = 1.0 - smoothstep(0.0, 0.16, tf) * (1.0 - smoothstep(0.84, 1.0, tf));
+            terr = mix(terr, toLinear(vec3(0.42, 0.40, 0.28)), riser * 0.7);
+            float terrLod = 1.0 - smoothstep(0.15, 0.5, fwidth(tb));
+            diffuseColor.rgb = mix(diffuseColor.rgb, terr, vLand.y * terrLod * 0.8);
+            // forest canopy & general ground texture
+            float n1 = lnoise(p * 0.9);
+            float n2 = lnoise(p * 3.7);
+            diffuseColor.rgb *= mix(0.86 + 0.28 * (0.6 * n1 + 0.4 * n2), 0.72 + 0.5 * n2, vLand.z * 0.6);
+          }
           {
             float elev = vTerrainPos.y * uMetersPerUnit + uDatum;
             float f1 = elev / uContourInterval;
@@ -314,7 +377,14 @@ export default function GeoViewport(props: GeoViewportProps) {
         );
     };
     const terrain = new THREE.Mesh(terrainGeo, terrainMat);
+    terrain.castShadow = true;
+    terrain.receiveShadow = true;
     scene.add(terrain);
+
+    /* --- Roads, bridge, buildings, forest ------------------------------- */
+    const world = createWorldFeatures(propsRef.current.buildings, propsRef.current.roads);
+    scene.add(world.group);
+    let worldRelief = -1;
 
     /* --- Block-diagram skirt ------------------------------------------- */
     const perimeter: number[] = [];
@@ -497,7 +567,7 @@ export default function GeoViewport(props: GeoViewportProps) {
       terrainUniforms.uGridOpacity.value = t.gridOpacity;
       frameMat.color.setHex(t.frame);
       skirtMat.color.setHex(t.skirt);
-      waterMat.color.setHex(t.water);
+      world.setTheme(theme);
       rainUniforms.uColor.value.setHex(t.rain);
       rainUniforms.uOpacity.value = t.rainOpacity;
     };
@@ -524,7 +594,19 @@ export default function GeoViewport(props: GeoViewportProps) {
       for (let k = 0; k < VERTEX_COUNT; k++) {
         positions[k * 3 + 1] = elevation[k] * Y_SCALE;
         const o = k * 3;
-        if (layer === 'risk') riskColor(risk[k], (elevation[k] - minE) / span, slope[k], theme, colors, o);
+        if (layer === 'landscape')
+          landscapeColor(
+            elevation[k] + DATUM_ASL_M,
+            slope[k],
+            dem.riverDist[k],
+            landCover[k * 3],
+            landCover[k * 3 + 1],
+            landCover[k * 3 + 2],
+            theme,
+            colors,
+            o,
+          );
+        else if (layer === 'risk') riskColor(risk[k], (elevation[k] - minE) / span, slope[k], theme, colors, o);
         else elevationColor(elevation[k] + DATUM_ASL_M, theme, colors, o);
         colors[o] = SRGB_TO_LINEAR[Math.round(colors[o] * 255)];
         colors[o + 1] = SRGB_TO_LINEAR[Math.round(colors[o + 1] * 255)];
@@ -543,6 +625,19 @@ export default function GeoViewport(props: GeoViewportProps) {
       skirtGeo.computeBoundingSphere();
 
       water.position.y = current.riverLevel * Y_SCALE;
+
+      const natural = layer === 'landscape';
+      const st = SCENE_THEMES[theme];
+      terrainUniforms.uLandscape.value = natural ? 1 : 0;
+      terrainUniforms.uContourOpacity.value = natural ? st.contourOpacity * 0.35 : st.contourOpacity;
+      terrainUniforms.uGridOpacity.value = natural ? 0 : st.gridOpacity;
+      waterMat.color.setHex(natural ? st.waterNatural : st.water);
+
+      // features only need re-draping when the relief (slope gradient) changes
+      if (Math.abs(stats.reliefScale - worldRelief) > 1e-3) {
+        worldRelief = stats.reliefScale;
+        world.update(elevation, slope);
+      }
 
       const maxY = stats.maxElevation * Y_SCALE;
       if (Math.abs(maxY - lastMaxY) > 0.01) {
@@ -655,6 +750,7 @@ export default function GeoViewport(props: GeoViewportProps) {
         if (pointerInside) hoverDirty = true;
       }
 
+      world.group.visible = p.showWorld;
       if (!p.rainPaused) rainUniforms.uTime.value += dt;
 
       const req = p.cameraRequest;
@@ -719,11 +815,16 @@ export default function GeoViewport(props: GeoViewportProps) {
     };
   }, []);
 
-  const { onCameraPreset } = props;
+  const { onCameraPreset, showWorld, onToggleWorld } = props;
   return (
     <div className="relative h-full w-full overflow-hidden bg-canvas">
       <div ref={containerRef} className="absolute inset-0 isolate z-0" />
-      <CameraToolbar onSelect={onCameraPreset} active={props.cameraRequest.preset} />
+      <CameraToolbar
+        onSelect={onCameraPreset}
+        active={props.cameraRequest.preset}
+        showWorld={showWorld}
+        onToggleWorld={onToggleWorld}
+      />
     </div>
   );
 }
@@ -738,7 +839,17 @@ const PRESET_BUTTONS: { id: CameraPreset; label: string; Icon: typeof Box }[] = 
   { id: 'topdown', label: 'Top-Down GIS', Icon: MapIcon },
 ];
 
-function CameraToolbar({ onSelect, active }: { onSelect: (p: CameraPreset) => void; active: CameraPreset }) {
+function CameraToolbar({
+  onSelect,
+  active,
+  showWorld,
+  onToggleWorld,
+}: {
+  onSelect: (p: CameraPreset) => void;
+  active: CameraPreset;
+  showWorld: boolean;
+  onToggleWorld: () => void;
+}) {
   return (
     <div className="absolute bottom-4 right-4 z-10 flex flex-col items-end gap-2">
       <div className="hidden border border-line bg-panel px-2.5 py-1.5 font-mono text-[10px] uppercase tracking-wider text-muted md:block">
@@ -753,6 +864,19 @@ function CameraToolbar({ onSelect, active }: { onSelect: (p: CameraPreset) => vo
           {GEO_ORIGIN.lon.toFixed(2)}–{(GEO_ORIGIN.lon + SPAN_LON_DEG).toFixed(2)}°E
         </span>
       </div>
+      <div className="flex gap-2">
+      <button
+        type="button"
+        onClick={onToggleWorld}
+        aria-pressed={showWorld}
+        className={`flex h-8 items-center gap-1.5 border border-line px-2.5 text-[11px] font-medium transition-colors ${
+          showWorld ? 'bg-subtle text-fg' : 'bg-panel text-muted hover:bg-subtle hover:text-fg'
+        }`}
+        title="Show roads, buildings, bridge and forest"
+      >
+        <Trees size={14} strokeWidth={1.5} />
+        <span className="hidden lg:inline">World Features</span>
+      </button>
       <div className="flex border border-line bg-panel" role="group" aria-label="Camera presets">
         {PRESET_BUTTONS.map(({ id, label, Icon }, n) => (
           <button
@@ -768,6 +892,7 @@ function CameraToolbar({ onSelect, active }: { onSelect: (p: CameraPreset) => vo
             <span className="hidden lg:inline">{label}</span>
           </button>
         ))}
+      </div>
       </div>
     </div>
   );

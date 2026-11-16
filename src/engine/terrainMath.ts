@@ -78,7 +78,7 @@ export interface SimParams {
 
 export type RiskBand = 'safe' | 'warning' | 'critical';
 export type ThemeMode = 'light' | 'dark';
-export type LayerMode = 'risk' | 'elevation';
+export type LayerMode = 'landscape' | 'risk' | 'elevation';
 
 /* ------------------------------------------------------------------------ */
 /* Scalar helpers                                                            */
@@ -563,6 +563,94 @@ export function elevationColor(elevAsl: number, theme: ThemeMode, out: Float32Ar
   out[o] = lerp(c0[0], c1[0], t) * k;
   out[o + 1] = lerp(c0[1], c1[1], t) * k;
   out[o + 2] = lerp(c0[2], c1[2], t) * k;
+}
+
+/* ------------------------------------------------------------------------ */
+/* Land cover (Landscape layer + 3D world features)                          */
+/* ------------------------------------------------------------------------ */
+
+/** Floodplain half-width used by the DEM, metres. */
+export const VALLEY_FLOOR_M = 650;
+/** Approximate tree line, metres ASL. */
+export const TREELINE_ASL_M = 3850;
+
+/** Position up the valley wall: < 0 floodplain, 0 toe .. 1 crest. */
+export const wallPosition = (riverDist: number): number => (riverDist - VALLEY_FLOOR_M) / 1900;
+
+/**
+ * Static forest density 0..1 (before the elevation tree line is applied).
+ * Patchy forest on the mid/upper valley walls; terraced farmland below.
+ */
+export function forestDensity(xm: number, zm: number, riverDist: number): number {
+  const t = wallPosition(riverDist);
+  const patch = smoothstep(-0.14, 0.16, fbm(xm / 1300, zm / 1300, 71, 4));
+  return clamp(patch * smoothstep(0.12, 0.3, t));
+}
+
+/**
+ * Per-vertex land-cover weights, 3 floats per vertex:
+ * [0] cultivated floodplain fields, [1] hillside terraces, [2] forest.
+ */
+export function computeLandCover(dem: DEM): Float32Array {
+  const out = new Float32Array(VERTEX_COUNT * 3);
+  for (let j = 0; j < GRID; j++) {
+    const zm = gridToMeters(j);
+    for (let i = 0; i < GRID; i++) {
+      const k = j * GRID + i;
+      const xm = gridToMeters(i);
+      const d = dem.riverDist[k];
+      const t = wallPosition(d);
+      const forest = forestDensity(xm, zm, d);
+      out[k * 3] = smoothstep(95, 150, d) * (1 - smoothstep(560, 690, d));
+      out[k * 3 + 1] = smoothstep(600, 720, d) * (1 - smoothstep(0.26, 0.46, t)) * (1 - forest);
+      out[k * 3 + 2] = forest;
+    }
+  }
+  return out;
+}
+
+const LC = {
+  gravel: hex(0xa59e8c),
+  grass: hex(0x86a052),
+  field: hex(0x97a85a),
+  terrace: hex(0xa3ad62),
+  broadleaf: hex(0x3f6131),
+  conifer: hex(0x2d4a31),
+  alpine: hex(0x948d66),
+  rock: hex(0x7d766c),
+  snow: hex(0xf3f5f7),
+} as const;
+
+/** Natural land-cover colour (the shader adds field / terrace texture). */
+export function landscapeColor(
+  elevAsl: number,
+  slopeDeg: number,
+  riverDist: number,
+  field: number,
+  terrace: number,
+  forest: number,
+  theme: ThemeMode,
+  out: Float32Array,
+  o: number,
+): void {
+  const wForest = forest * (1 - smoothstep(TREELINE_ASL_M - 350, TREELINE_ASL_M + 50, elevAsl));
+  const wConifer = smoothstep(1700, 2700, elevAsl);
+  const wAlpine = smoothstep(3000, 3700, elevAsl);
+  const wGravel = 1 - smoothstep(72, 118, riverDist);
+  const wRock = Math.max(smoothstep(36, 54, slopeDeg), smoothstep(3800, 4300, elevAsl));
+  const wSnow = smoothstep(4250, 4700, elevAsl) * (1 - smoothstep(42, 60, slopeDeg));
+  const k = theme === 'dark' ? 0.8 : 1;
+  for (let c = 0; c < 3; c++) {
+    let v = LC.grass[c];
+    v = lerp(v, LC.field[c], field);
+    v = lerp(v, LC.terrace[c], terrace);
+    v = lerp(v, LC.alpine[c], wAlpine);
+    v = lerp(v, lerp(LC.broadleaf[c], LC.conifer[c], wConifer), wForest);
+    v = lerp(v, LC.gravel[c], wGravel);
+    v = lerp(v, LC.rock[c], wRock);
+    v = lerp(v, LC.snow[c], wSnow);
+    out[o + c] = v * k;
+  }
 }
 
 /* ------------------------------------------------------------------------ */

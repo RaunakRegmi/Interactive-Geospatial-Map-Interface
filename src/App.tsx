@@ -31,7 +31,7 @@ import {
 
 const THEME_KEY = 'pahiro-theme';
 
-/** Optional deep-link query parameters, e.g. ?view=3d&scenario=extreme&theme=dark&layer=elevation&camera=topdown */
+/** Optional deep-link query parameters, e.g. ?view=3d&scenario=extreme&theme=dark&layer=elevation&camera=topdown&world=0 */
 const query = new URLSearchParams(window.location.search);
 const queryScenario = SCENARIOS.find((s) => s.id === query.get('scenario'));
 const queryCamera = query.get('camera');
@@ -61,7 +61,11 @@ export default function App() {
   const [view, setView] = useState<ViewMode>(query.get('view') === '3d' ? '3d' : '2d');
   const [params, setParams] = useState<SimParams>(queryScenario?.params ?? DEFAULT_PARAMS);
   const [theme, setTheme] = useState<ThemeMode>(initialTheme);
-  const [layer, setLayer] = useState<LayerMode>(query.get('layer') === 'elevation' ? 'elevation' : 'risk');
+  const [layer, setLayer] = useState<LayerMode>(() => {
+    const q = query.get('layer');
+    return q === 'elevation' || q === 'risk' ? q : 'landscape';
+  });
+  const [showWorld, setShowWorld] = useState(query.get('world') !== '0');
   const [rainPaused, setRainPaused] = useState(false);
   const [hover, setHover] = useState<HoverInfo | null>(null);
   const [cameraRequest, setCameraRequest] = useState<CameraRequest>({
@@ -192,6 +196,10 @@ export default function App() {
                 cameraRequest={cameraRequest}
                 onCameraPreset={selectCamera}
                 onHover={setHover}
+                buildings={buildings}
+                roads={roads}
+                showWorld={showWorld}
+                onToggleWorld={() => setShowWorld((w) => !w)}
               />
               <TelemetryCard params={params} stats={stats} layer={layer} />
               <ControlTaskbar
